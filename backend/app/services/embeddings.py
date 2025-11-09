@@ -84,11 +84,12 @@ class EmbeddingService:
         except Exception as e:
             raise EmbeddingError(f"Unexpected embedding error: {e}") from e
 
-    def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts.
+    def embed_batch(self, texts: List[str], use_batch_api: bool = True) -> List[List[float]]:
+        """Generate embeddings for multiple texts with optimized batch processing.
 
         Args:
             texts: List of texts to embed
+            use_batch_api: Use Ollama's batch API (faster) vs sequential processing
 
         Returns:
             List of embedding vectors
@@ -100,23 +101,49 @@ class EmbeddingService:
         if not texts:
             raise ValueError("Texts list cannot be empty")
 
-        embeddings = []
-        for i, text in enumerate(texts):
+        # Use batch API for better performance
+        if use_batch_api:
             try:
-                embedding = self.embed_text(text)
-                embeddings.append(embedding)
-            except EmbeddingError as e:
-                print(f"⚠️ Failed to embed text {i+1}/{len(texts)}: {e}")
-                # Return empty embedding as placeholder
-                embeddings.append([])
+                response = ollama.embed(
+                    model=self.config.embedding_model,
+                    input=texts
+                )
+                return response["embeddings"]
+            except KeyError as e:
+                raise OllamaModelNotFoundError(
+                    f"Model '{self.config.embedding_model}' not found.\n"
+                    f"Run: ollama pull {self.config.embedding_model}"
+                ) from e
+            except Exception as e:
+                # Fallback to sequential processing if batch fails
+                print(f"⚠️ Batch embedding failed, falling back to sequential: {e}")
+                use_batch_api = False
 
-        return embeddings
+        # Fallback: sequential processing
+        if not use_batch_api:
+            embeddings = []
+            for i, text in enumerate(texts):
+                try:
+                    embedding = self.embed_text(text)
+                    embeddings.append(embedding)
+                except EmbeddingError as e:
+                    print(f"⚠️ Failed to embed text {i+1}/{len(texts)}: {e}")
+                    # Return empty embedding as placeholder
+                    embeddings.append([])
+            return embeddings
 
-    def embed_qa_pairs(self, qa_pairs: List[dict]) -> List[List[float]]:
-        """Generate embeddings for Q&A pairs.
+    def embed_qa_pairs(
+        self,
+        qa_pairs: List[dict],
+        laq_metadata: dict = None,
+        use_enhanced_context: bool = True
+    ) -> List[List[float]]:
+        """Generate embeddings for Q&A pairs with optional context enhancement.
 
         Args:
             qa_pairs: List of dictionaries with 'question' and 'answer' keys
+            laq_metadata: Optional metadata (minister, date, laq_type, etc.) to enrich context
+            use_enhanced_context: Whether to include metadata in embedding for better quality
 
         Returns:
             List of embedding vectors
@@ -127,8 +154,27 @@ class EmbeddingService:
         if not qa_pairs:
             raise ValueError("Q&A pairs list cannot be empty")
 
-        texts = [
-            f"Q: {qa.get('question', '')}\nA: {qa.get('answer', '')}"
-            for qa in qa_pairs
-        ]
+        texts = []
+        for qa in qa_pairs:
+            question = qa.get('question', '')
+            answer = qa.get('answer', '')
+
+            if use_enhanced_context and laq_metadata:
+                # Enhanced format with context for better semantic search
+                context_parts = []
+                if laq_metadata.get('laq_type'):
+                    context_parts.append(f"Type: {laq_metadata['laq_type']}")
+                if laq_metadata.get('minister'):
+                    context_parts.append(f"Minister: {laq_metadata['minister']}")
+                if laq_metadata.get('date'):
+                    context_parts.append(f"Date: {laq_metadata['date']}")
+
+                context = " | ".join(context_parts)
+                text = f"[{context}]\nQuestion: {question}\nAnswer: {answer}"
+            else:
+                # Simple format (backward compatible)
+                text = f"Q: {question}\nA: {answer}"
+
+            texts.append(text)
+
         return self.embed_batch(texts)
