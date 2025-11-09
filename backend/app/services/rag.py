@@ -1,6 +1,7 @@
 """RAG (Retrieval-Augmented Generation) operations for LAQ search and chat."""
 
 import json
+import math
 from typing import List, Dict, Tuple, Optional
 import ollama
 
@@ -75,7 +76,12 @@ class RAGService:
             formatted_results = []
             for i, doc_id in enumerate(ids):
                 distance = distances[i]
-                similarity = (1 - distance) * 100  # Convert to percentage
+                # ChromaDB with "cosine" metric returns squared L2 distance on normalized vectors
+                # which is equivalent to: 2 * (1 - cosine_similarity)
+                # So: cosine_similarity = 1 - (distance / 2)
+                # Convert to percentage: similarity = (1 - distance/2) * 100
+                cosine_similarity = 1 - (distance / 2)
+                similarity = max(0, min(100, cosine_similarity * 100))
 
                 # Determine match quality
                 if similarity >= 80:
