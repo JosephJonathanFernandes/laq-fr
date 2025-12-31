@@ -18,22 +18,51 @@ router = APIRouter()
 @router.post("/upload", response_model=AnnexureUploadResponse)
 async def upload_annexure(
     file: UploadFile = File(...),
-    laq_number: str = Form(...),
-    pdf_name: str = Form(...),
-    annexure_label: str = Form(None),
+    laq_number: str = Form(None),
 ) -> AnnexureUploadResponse:
     """
     Upload and process an annexure Excel file (.xls/.xlsx) for a specific LAQ.
 
-    - Validates file type
+    Automatically derives all metadata from the file:
     - Parses Excel into readable text per sheet
     - Generates embedding and stores as annexure document
-    - Links to LAQ via metadata (laq_number)
+    - Links to LAQ via extracted/provided laq_number
+
+    Args:
+        file: Excel file (.xls/.xlsx) to upload
+        laq_number: LAQ number (optional, will try to extract from filename if not provided)
     """
 
     # Validate file type by extension first
     if not (file.filename.endswith(".xls") or file.filename.endswith(".xlsx")):
         raise HTTPException(status_code=400, detail="Only .xls/.xlsx files are allowed")
+
+    # Extract LAQ number from filename if not provided
+    # Patterns: "123_annexure.xlsx", "laq123_data.xlsx", "123.xlsx"
+    import re
+
+    extracted_laq = None
+    if not laq_number:
+        # Try patterns: number at start, after "laq", or standalone
+        filename_stem = Path(file.filename).stem
+        patterns = [
+            r"^(\d+)",  # Number at start
+            r"laq[_-]?(\d+)",  # "laq123" or "laq_123"
+            r"(\d+)[_-]",  # "123_" pattern
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, filename_stem, re.IGNORECASE)
+            if match:
+                extracted_laq = match.group(1)
+                break
+
+        if not extracted_laq:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract LAQ number from filename '{file.filename}'. "
+                "Please name file as '123_annexure.xlsx' or provide laq_number parameter.",
+            )
+        laq_number = extracted_laq
 
     upload_dir = Path("./uploads/annexures")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -54,8 +83,6 @@ async def upload_annexure(
         db = LAQDatabase(config)
         validator = ValidationService(config)
 
-<<<<<<< HEAD
-=======
         # Derive annexure label from filename - extract just the annexure identifier
         filename_stem = Path(file.filename).stem
         
@@ -106,7 +133,6 @@ async def upload_annexure(
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
 
->>>>>>> 42631c7 (update backend)
         annexure = processor.process_excel(str(file_path))
 
         # Use full text for storage/display; use truncated text for embedding generation
@@ -116,8 +142,7 @@ async def upload_annexure(
 
         stored_id = db.store_annexure(
             laq_num=laq_number,
-            pdf_name=pdf_name,
-            annexure_label=annexure_label or Path(file.filename).stem,
+            annexure_label=annexure_label,
             content_text=full_text,
             embedding=embedding,
             extra_meta={
@@ -130,7 +155,7 @@ async def upload_annexure(
             success=True,
             message=f"Annexure stored with ID {stored_id}",
             laq_number=laq_number,
-            annexure_label=annexure_label or Path(file.filename).stem,
+            annexure_label=annexure_label,
             stored_id=stored_id,
         )
 

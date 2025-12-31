@@ -10,7 +10,6 @@ from app.api.endpoints import (
     annexure,
     annexure_list,
     chat,
-    cleanup,
     database,
     laqs,
     search,
@@ -50,7 +49,6 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(database.router, prefix="/api/database", tags=["database"])
 app.include_router(laqs.router, prefix="/api/laqs", tags=["laqs"])
 app.include_router(validation.router, prefix="/api/validation", tags=["validation"])
-app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
 
 
 @app.get("/")
